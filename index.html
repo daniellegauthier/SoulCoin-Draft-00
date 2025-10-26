@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SoulCoin – Emancipation Ritual</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/blakejs@1.2.1/blake2b.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@iden3/js-crypto@1.0.2/dist/poseidon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ipfs-http-client@60.0.0/dist/index.min.js"></script>
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; text-align:center; margin-top:3em;}
+    input, button { margin:1em; padding:0.5em; }
+    #log { white-space: pre-wrap; text-align:left; max-width:700px; margin:auto; background:#222; padding:1em; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <h1>🌕 SoulCoin – Emancipation Ritual</h1>
+  <button id="connectBtn">Connect Wallet</button><br>
+  <input type="file" id="proofFile" accept=".json" /><br>
+  <button id="mintBtn">Generate Proof + Mint SoulCoin</button>
+
+  <div id="log"></div>
+
+  <script type="module">
+    import { create as createIPFS } from "https://cdn.jsdelivr.net/npm/ipfs-http-client@60.0.0/dist/index.min.js";
+
+    const CONTRACT_ADDRESS = "0xYourDeployedSoulCoinContract";
+    const ABI = [
+      "function mintSoul(bytes proof, bytes32 ritualHash, string tokenURI) external",
+      "event Emancipated(address indexed soul, bytes32 ritualHash)"
+    ];
+
+    const ipfs = createIPFS({ url: "https://ipfs.infura.io:5001/api/v0" });
+    const log = msg => document.getElementById("log").textContent += msg + "\\n";
+
+    let provider, signer, contract;
+
+    // Connect to wallet
+    document.getElementById("connectBtn").onclick = async () => {
+      if (!window.ethereum) return alert("Metamask not found");
+      provider = new ethers.BrowserProvider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      signer = await provider.getSigner();
+      contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+      const addr = await signer.getAddress();
+      log("Connected wallet: " + addr);
+    };
+
+    // Compute Poseidon→Blake2b ritualHash
+    async function computeRitualHash(colors) {
+      const poseidonHash = window.poseidon.hash(colors);
+      const bytes = ethers.getBytes(poseidonHash);
+      const blake = blake2b(bytes, null, 32);
+      return "0x" + Buffer.from(blake).toString("hex");
+    }
+
+    // Upload encrypted metadata
+    async function uploadToIPFS(metadataObj) {
+      const { cid } = await ipfs.add(JSON.stringify(metadataObj));
+      return "ipfs://" + cid.toString();
+    }
+
+    // Mint SoulCoin
+    document.getElementById("mintBtn").onclick = async () => {
+      try {
+        const file = document.getElementById("proofFile").files[0];
+        if (!file) return alert("Select your proof JSON");
+        const proofData = JSON.parse(await file.text());
+
+        log("Calculating ritualHash…");
+        const ritualHash = await computeRitualHash(proofData.colors);
+
+        log("Encrypting & uploading color-morphology metadata…");
+        const tokenURI = await uploadToIPFS({
+          colorMorph: proofData.colors,
+          timestamp: Date.now(),
+          ritual: "emancipation"
+        });
+
+        log("Submitting transaction…");
+        const tx = await contract.mintSoul(proofData.proofBytes, ritualHash, tokenURI);
+        log("Waiting for confirmation…");
+        const receipt = await tx.wait();
+        log("✅ SoulCoin Emancipation minted!");
+        log("TX Hash: " + receipt.hash);
+      } catch (err) {
+        console.error(err);
+        log("❗ Error: " + err.message);
+      }
+    };
+  </script>
+</body>
+</html>
